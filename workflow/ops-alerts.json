@@ -1,0 +1,376 @@
+{
+  "id": "VP5QFCgs9Ir6CigL",
+  "name": "P2 - Ops Alerts",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d3622b0a-7627-4da8-8e70-95630591b190",
+      "name": "Execution Failed",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A workflow execution failed (n8n Error Workflow). Describe it in the technical error contract.\nconst data = $input.first().json;\nconst execution = data.execution ?? {};\nconst error = execution.error ?? data.trigger?.error ?? {};\nconst message = String(error.message ?? error.description ?? \"Unknown error\").slice(0, 2000);\nconst node = execution.lastNodeExecuted ?? error.node?.name ?? null;\n\n// The fingerprint groups repeats of the same problem: numbers, ids and quoted values are removed.\nconst normalized = message\n  .replace(/\\b(RFQ|QUO)-\\d{8}-[A-Z0-9]{6}\\b/g, \"<id>\")\n  .replace(/<[^>@\\s]+@[^>\\s]+>/g, \"<message-id>\")\n  .replace(/\"[^\"]*\"/g, '\"…\"')\n  .replace(/\\b[0-9a-f]{16,}\\b/gi, \"<hash>\")\n  .replace(/\\d+/g, \"#\");\n\nreturn [\n  {\n    json: {\n      source: \"execution_error\",\n      event_type: \"execution_failed\",\n      workflow_id: data.workflow?.id ?? null,\n      workflow_name: data.workflow?.name ?? null,\n      execution_id: execution.id ?? null,\n      execution_url: execution.url ?? null,\n      node,\n      message,\n      reference: message.match(/\\b(RFQ|QUO)-\\d{8}-[A-Z0-9]{6}\\b/)?.[0] ?? null,\n      fingerprint: `${data.workflow?.id ?? \"?\"}|${node ?? \"?\"}|${normalized}`.slice(0, 1000),\n    },\n  },\n];"
+      },
+      "id": "47aff9a2-f0ce-475a-82ae-3fb6cefcab2d",
+      "name": "Describe Execution Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "8e2ec8b1-ac29-4dc4-93dd-4f30a275467f",
+      "name": "Ops Command",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A technical failure that the workflows handle themselves (so the execution succeeds) but an\n// administrator must know about: RFQ FAILED after retries, LLM API failure, customer delivery failure.\n// Contract: { operation: \"ops_event\", payload: { event_type, message, reference?, workflow_name? } }\nconst command = $input.first().json;\nif (command.operation !== \"ops_event\") {\n  throw new Error(`Unknown ops operation: ${command.operation}`);\n}\nconst payload = command.payload ?? {};\nconst eventType = String(payload.event_type ?? \"unknown\");\nconst message = String(payload.message ?? \"\").slice(0, 2000) || \"(no message)\";\nconst normalized = message\n  .replace(/\\b(RFQ|QUO)-\\d{8}-[A-Z0-9]{6}\\b/g, \"<id>\")\n  .replace(/\\b[0-9a-f]{16,}\\b/gi, \"<hash>\")\n  .replace(/\\d+/g, \"#\");\n\nreturn [\n  {\n    json: {\n      source: \"ops_event\",\n      event_type: eventType,\n      workflow_id: null,\n      workflow_name: payload.workflow_name ?? null,\n      execution_id: null,\n      execution_url: null,\n      node: null,\n      message,\n      reference: payload.reference ? String(payload.reference) : null,\n      fingerprint: `ops|${eventType}|${normalized}`.slice(0, 1000),\n    },\n  },\n];"
+      },
+      "id": "8c4986ea-ec3a-4122-a7f1-620f7c1795bf",
+      "name": "Describe Ops Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One technical error contract for both entry points.\nreturn $input.all();"
+      },
+      "id": "6c750c56-61bc-46ab-9202-4d41a536f7ff",
+      "name": "Technical Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Record the technical error and decide atomically whether to email: only if the same fingerprint\n-- was not alerted within alert_cooldown_minutes. Every occurrence is recorded either way.\nWITH input AS (\n    SELECT $1::jsonb AS doc\n),\ncfg AS (\n    SELECT COALESCE((SELECT (value #>> '{}')::int FROM app_settings WHERE key = 'alert_cooldown_minutes'), 30) AS cooldown_minutes\n),\ninserted AS (\n    INSERT INTO technical_errors (\n        source, event_type, workflow_id, workflow_name, execution_id, execution_url,\n        node, message, reference, fingerprint, alerted\n    )\n    SELECT\n        doc ->> 'source',\n        doc ->> 'event_type',\n        doc ->> 'workflow_id',\n        doc ->> 'workflow_name',\n        doc ->> 'execution_id',\n        doc ->> 'execution_url',\n        doc ->> 'node',\n        doc ->> 'message',\n        doc ->> 'reference',\n        doc ->> 'fingerprint',\n        NOT EXISTS (\n            SELECT 1\n            FROM technical_errors e, cfg\n            WHERE e.fingerprint = doc ->> 'fingerprint'\n              AND e.alerted\n              AND e.occurred_at > NOW() - make_interval(mins => cfg.cooldown_minutes)\n        )\n    FROM input\n    RETURNING id, alerted, fingerprint, occurred_at\n)\nSELECT\n    i.id AS technical_error_id,\n    i.alerted AS should_alert,\n    i.occurred_at,\n    (SELECT COUNT(*) FROM technical_errors e\n      WHERE e.fingerprint = i.fingerprint AND e.occurred_at > NOW() - interval '24 hours')\n        + 1 AS occurrences_24h,  -- the statement snapshot does not include the row it inserts\n    (SELECT cooldown_minutes FROM cfg) AS cooldown_minutes,\n    (SELECT jsonb_object_agg(key, value) FROM app_settings\n      WHERE key IN ('alert_recipients', 'email_from', 'language')) AS settings\nFROM inserted i;",
+        "options": {
+          "queryReplacement": "=$1 → {{ JSON.stringify($json) }}",
+          "largeNumbersOutput": "numbers"
+        }
+      },
+      "id": "1c651d6b-a581-4198-9545-b6c7b125dfac",
+      "name": "Record Technical Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "7hqY9Dpt4azX9jBD",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Email the administrator. If the database itself failed, the error cannot be recorded and the\n// recipients are unknown: the execution fails loudly and GET /webhook/health reports the outage.\nconst recorded = $input.first().json;\nconst event = $('Technical Error').first().json;\n\nif (recorded.error) {\n  throw new Error(`Could not record technical error (${event.event_type}: ${event.message}): ${recorded.error.message ?? recorded.error}`);\n}\nif (!recorded.should_alert) {\n  return [];\n}\n\nconst settings = recorded.settings ?? {};\nconst recipients = settings.alert_recipients;\nif (!Array.isArray(recipients) || recipients.length === 0) {\n  throw new Error(\"app_settings.alert_recipients must list at least one address.\");\n}\n\n// Administrator-facing technical texts (not client communication templates).\nconst TEXTS = {\n  pl: {\n    subject: \"[RFQ Automation] Problem techniczny: {title}\",\n    intro: \"System RFQ Automation zgłosił problem techniczny.\",\n    type: \"Typ\", workflow: \"Workflow\", node: \"Node\", message: \"Komunikat\", reference: \"Dotyczy\",\n    time: \"Czas\", execution: \"Wykonanie w n8n\", occurrences: \"Wystąpienia tego problemu w ostatnich 24 h\",\n    cooldown: \"Kolejne wystąpienia tego samego problemu są zapisywane w tabeli technical_errors; następny mail najwcześniej za {minutes} min.\",\n  },\n  en: {\n    subject: \"[RFQ Automation] Technical problem: {title}\",\n    intro: \"RFQ Automation reported a technical problem.\",\n    type: \"Type\", workflow: \"Workflow\", node: \"Node\", message: \"Message\", reference: \"Reference\",\n    time: \"Time\", execution: \"n8n execution\", occurrences: \"Occurrences of this problem in the last 24 h\",\n    cooldown: \"Further occurrences of the same problem are recorded in technical_errors; the next email is sent after {minutes} min at the earliest.\",\n  },\n};\nconst t = TEXTS[settings.language] ?? TEXTS.en;\nconst fill = (template, values) => template.replace(/\\{(\\w+)\\}/g, (m, k) => (k in values ? String(values[k]) : m));\nconst title = event.workflow_name ? `${event.workflow_name}${event.node ? ` / ${event.node}` : \"\"}` : event.event_type;\n\nconst lines = [\n  t.intro,\n  \"\",\n  `${t.type}: ${event.event_type}`,\n  ...(event.workflow_name ? [`${t.workflow}: ${event.workflow_name}`] : []),\n  ...(event.node ? [`${t.node}: ${event.node}`] : []),\n  `${t.message}: ${event.message}`,\n  ...(event.reference ? [`${t.reference}: ${event.reference}`] : []),\n  `${t.time}: ${recorded.occurred_at}`,\n  ...(event.execution_url ? [`${t.execution}: ${event.execution_url}`] : []),\n  `${t.occurrences}: ${recorded.occurrences_24h}`,\n  \"\",\n  fill(t.cooldown, { minutes: recorded.cooldown_minutes }),\n];\n\nreturn [\n  {\n    json: {\n      technical_error_id: recorded.technical_error_id,\n      from: settings.email_from,\n      to: recipients.join(\", \"),\n      subject: fill(t.subject, { title }).slice(0, 200),\n      text: lines.join(\"\\n\"),\n    },\n  },\n];"
+      },
+      "id": "48eea2cb-a138-47de-b7c7-d4c387aeb4a0",
+      "name": "Build Alert Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.from }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "f84596b0-0759-4897-853c-61c7311744a2",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "bEZaYhgueoam1Oe1",
+          "name": "Mailpit SMTP (dev)"
+        }
+      },
+      "webhookId": "5c49235d-f81a-42cd-b1a3-edbd4845ad82",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The alert email could not be sent: release the throttle so the next occurrence tries again.\nUPDATE technical_errors\nSET alerted = FALSE\nWHERE id = ($1::jsonb ->> 'technical_error_id')::bigint\nRETURNING id;",
+        "options": {
+          "queryReplacement": "=$1 → {{ JSON.stringify({ technical_error_id: $('Build Alert Email').first().json.technical_error_id }) }}",
+          "largeNumbersOutput": "numbers"
+        }
+      },
+      "id": "f9a8427c-3fee-4eae-bead-7cf462180a9a",
+      "name": "Release Alert Throttle",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1540,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "7hqY9Dpt4azX9jBD",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "health",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e08027c6-8c1b-4f83-b73d-868e41eefb41",
+      "name": "Health Check",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        500
+      ],
+      "webhookId": "ec693647-5e2c-490d-a9a9-17fa68c919da"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    NOW() AS checked_at,\n    COALESCE((SELECT (value #>> '{}')::int FROM app_settings WHERE key = 'heartbeat_stale_minutes'), 5) AS stale_minutes,\n    COALESCE((SELECT value FROM app_settings WHERE key = 'health_expected_heartbeats'), '[\"core_recovery\"]'::jsonb) AS expected_heartbeats,\n    COALESCE((SELECT jsonb_object_agg(name, last_seen_at) FROM system_heartbeats), '{}'::jsonb) AS heartbeats,\n    (SELECT COUNT(*) FROM technical_errors WHERE occurred_at > NOW() - interval '1 hour') AS technical_errors_1h,\n    (SELECT COUNT(*) FROM rfqs WHERE status = 'FAILED' AND updated_at > NOW() - interval '24 hours') AS rfqs_failed_24h,\n    (SELECT COUNT(*) FROM quotes WHERE status = 'SEND_UNCERTAIN') AS quotes_send_uncertain,\n    (SELECT COUNT(*) FROM inbound_messages WHERE status = 'FAILED') AS inbound_messages_failed,\n    (SELECT COUNT(*) FROM review_tasks WHERE status = 'OPEN') AS open_review_tasks,\n    (SELECT COUNT(*) FROM quotes WHERE status = 'PENDING_APPROVAL') AS quotes_pending_approval;",
+        "options": {
+          "largeNumbersOutput": "numbers"
+        }
+      },
+      "id": "f5038bd3-f7ee-4e54-bce6-b4a788c0d322",
+      "name": "Read Health",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        220,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "7hqY9Dpt4azX9jBD",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Health for external monitoring: 503 only for infrastructure problems (database unreachable,\n// recovery schedules not running). Business counts are informational and never change the status.\nconst health = $input.first().json;\n\nif (health.error || !health.checked_at) {\n  return [{\n    json: {\n      http_status: 503,\n      // Public endpoint: no error details (they would expose internals); see the n8n execution log.\n      body: { status: \"down\", checks: { database: \"unreachable\" } },\n    },\n  }];\n}\n\nconst now = new Date(health.checked_at).getTime();\nconst staleMs = Number(health.stale_minutes) * 60000;\n// Only the schedules of installed workflows (app_settings.health_expected_heartbeats).\nconst expected = Array.isArray(health.expected_heartbeats) && health.expected_heartbeats.length ? health.expected_heartbeats : [\"core_recovery\"];\nconst heartbeats = {};\nfor (const name of expected) {\n  const lastSeen = health.heartbeats?.[name];\n  const ageSeconds = lastSeen ? Math.round((now - new Date(lastSeen).getTime()) / 1000) : null;\n  heartbeats[name] = {\n    last_seen_at: lastSeen ?? null,\n    age_seconds: ageSeconds,\n    status: ageSeconds !== null && ageSeconds * 1000 <= staleMs ? \"ok\" : \"stale\",\n  };\n}\nconst healthy = Object.values(heartbeats).every(h => h.status === \"ok\");\n\nreturn [{\n  json: {\n    http_status: healthy ? 200 : 503,\n    body: {\n      status: healthy ? \"ok\" : \"degraded\",\n      checked_at: health.checked_at,\n      checks: { database: \"ok\", heartbeats },\n      attention: {\n        technical_errors_last_hour: Number(health.technical_errors_1h),\n        rfqs_failed_last_24h: Number(health.rfqs_failed_24h),\n        quotes_send_uncertain: Number(health.quotes_send_uncertain),\n        inbound_messages_failed: Number(health.inbound_messages_failed),\n        open_review_tasks: Number(health.open_review_tasks),\n        quotes_pending_approval: Number(health.quotes_pending_approval),\n      },\n    },\n  },\n}];"
+      },
+      "id": "08402f38-c2ca-4897-87f5-840492e9c945",
+      "name": "Evaluate Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "43cf795e-364c-4489-aa89-3fa4d5f99b51",
+      "name": "Respond Health",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Ops Alerts\nSeparate from the core on purpose: alerts must work when the core does not.\n- **Error Workflow** of the core and both channels: every failed execution → `technical_errors` → email to `alert_recipients` (same problem at most once per `alert_cooldown_minutes`).\n- `ops_event` command: handled technical failures (RFQ FAILED, LLM API, customer delivery).\n- `GET /webhook/health` for external monitoring: 503 when the database is unreachable or a recovery schedule stopped.",
+        "width": 900,
+        "height": 260,
+        "color": 4
+      },
+      "id": "71fcd018-c9e4-4efb-949b-897d49a53d71",
+      "name": "Note 2d62d1af",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -420
+      ]
+    }
+  ],
+  "connections": {
+    "Execution Failed": {
+      "main": [
+        [
+          {
+            "node": "Describe Execution Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe Execution Error": {
+      "main": [
+        [
+          {
+            "node": "Technical Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops Command": {
+      "main": [
+        [
+          {
+            "node": "Describe Ops Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe Ops Event": {
+      "main": [
+        [
+          {
+            "node": "Technical Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Error": {
+      "main": [
+        [
+          {
+            "node": "Record Technical Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Technical Error": {
+      "main": [
+        [
+          {
+            "node": "Build Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Release Alert Throttle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health Check": {
+      "main": [
+        [
+          {
+            "node": "Read Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Health": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Health": {
+      "main": [
+        [
+          {
+            "node": "Respond Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

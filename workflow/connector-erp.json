@@ -1,0 +1,120 @@
+{
+  "id": "Dt352iMvfaqm4Ela",
+  "name": "P2 - Connector: ERP",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "5a5e97f0-381e-42e7-8fce-090a8c861bbb",
+      "name": "ERP Command",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Contract with the core (identical for every ERP):\n//   in:  { operation: \"price_check\", payload: { customer_code, currency, lines: [{ line_number, sku, quantity, unit }] } }\n//   out: { prices: [{ sku, unit_price, currency }] }  — net price per catalogue unit for this customer\n// Everything below is specific to the client's ERP: request format, URL, authentication, mapping.\nconst command = $input.first().json;\nif (command.operation !== \"price_check\") {\n  throw new Error(`Unknown ERP connector operation: ${command.operation}`);\n}\nconst payload = command.payload ?? {};\nreturn [{\n  json: {\n    customer_code: payload.customer_code ?? null,\n    lines: (payload.lines ?? []).map(line => ({ sku: line.sku, quantity: line.quantity, unit: line.unit })),\n  },\n}];"
+      },
+      "id": "94b0c65b-1811-4058-a82b-dd5d78b95204",
+      "name": "Build ERP Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8091/api/prices",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "5a06b10a-6ae0-4b01-b768-a95ec3c581ef",
+      "name": "ERP Price Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ERP response -> connector contract. Adjust the field names to the client's ERP API.\n// The core validates every price again (positive amount, currency, only requested SKUs).\nconst items = $input.first().json.items;\nif (!Array.isArray(items)) {\n  throw new Error(\"ERP response has no items list.\");\n}\nreturn [{\n  json: {\n    prices: items.map(item => ({ sku: String(item.index), unit_price: item.net_price, currency: item.curr })),\n  },\n}];"
+      },
+      "id": "14add21d-7957-491e-85bd-72324fa28616",
+      "name": "Map ERP Prices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Connector: ERP (client-specific)\nCalled by the core (`app_settings.erp_price_check_workflow_id`) for a live price check while pricing.\n- `price_check` `{ customer_code, currency, lines: [{ line_number, sku, quantity, unit }] }` → `{ prices: [{ sku, unit_price, currency }] }`\n- Set the ERP URL and an authentication credential in **ERP Price Request**, map the fields in **Map ERP Prices**.\n- Keep the timeout short: while it waits, the RFQ waits. Any failure → the core uses synced prices, tells the approver and alerts the administrator.\n- Dev: `node scripts/mock-erp.mjs` (fake ERP on :8091).",
+        "width": 900,
+        "height": 260,
+        "color": 4
+      },
+      "id": "c2f6afdd-dc54-4f39-aa4b-01076f80aae0",
+      "name": "Note ERP",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -300
+      ]
+    }
+  ],
+  "connections": {
+    "ERP Command": {
+      "main": [
+        [
+          {
+            "node": "Build ERP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build ERP Request": {
+      "main": [
+        [
+          {
+            "node": "ERP Price Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP Price Request": {
+      "main": [
+        [
+          {
+            "node": "Map ERP Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

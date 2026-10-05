@@ -1,0 +1,1143 @@
+{
+  "id": "nADCNLyN8IhTFTCC",
+  "name": "P2 - Channel: HTTP API",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rfq",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "b57c9757-9b9e-482a-b6d2-1c1db4275609",
+      "name": "RFQ Webhook",
+      "webhookId": "1aca79c7-742c-4229-bfac-8aa143c0474b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Webhook adapter: convert the webhook request into the canonical RFQ input contract.\n// The adapter knows only its source. Internal rfq_id and status are assigned by RFQ Intake.\nconst input = $input.first().json;\nconst body = input.body ?? {};\n\nreturn [\n  {\n    json: {\n      submission_id: body.submission_id,\n      received_at: new Date().toISOString(),\n\n      customer: {\n        name: body.customer?.name,\n        email: body.customer?.email,\n      },\n\n      source: {\n        type: \"webhook\",\n        reference: body.submission_id,\n      },\n\n      subject: body.subject,\n      requested_delivery_date: body.requested_delivery_date,\n\n      items: body.items,\n    },\n  },\n];"
+      },
+      "id": "72ec0063-ffa3-44a4-8450-e98334497a7a",
+      "name": "Canonical RFQ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { operation: \"intake\", payload: $input.first().json } }];"
+      },
+      "id": "18e331c8-e9e9-43d8-894d-38a14548dbd0",
+      "name": "RFQ Intake Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gjZKWMvALA8gsb20"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "ed52db04-56e9-4dd9-a2eb-899da8a37503",
+      "name": "RFQ Core Intake",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": "={{ { RECEIVED: 202, DUPLICATE: 200, REJECTED: 422 }[$json.status] ?? 500 }}"
+        }
+      },
+      "id": "9c1ccfb3-3220-41b4-baea-0a2cbb59423d",
+      "name": "Respond RFQ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rfq-review",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5c3ded7f-dd2c-44f4-bc2e-f6ccddab2863",
+      "name": "Review Decision Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "7e99c804-5355-4852-8337-094ebd8dd308"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The request body is the review decision contract.\nreturn [{ json: { operation: \"review_decision\", payload: $input.first().json.body ?? {} } }];"
+      },
+      "id": "f195aa32-cf93-418f-9f95-7562ea8c38fd",
+      "name": "Review Decision Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gjZKWMvALA8gsb20"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e321096d-70a2-4869-8eb5-0cc13bb2fb67",
+      "name": "RFQ Core Review Decision",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "3cbe19e5-9b94-4388-a433-cb7cb0805e50",
+      "name": "Respond Review Decision",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Channel: HTTP API\nAPI key required on `/rfq`, `/rfq-review`, `/quote-decision` (`X-API-Key` or `Authorization: Bearer`; SHA-256 in `app_settings.api_key_sha256`) → 401 otherwise. Review and quote decisions also need the task / quote `token`.\n- `POST /webhook/rfq` — RFQ as JSON → core `intake` → 202 RECEIVED / 200 DUPLICATE / 422 REJECTED\n- `POST /webhook/rfq-review` — review decision → core `review_decision` → 200 / 404 / 409 / 422\n- `POST /webhook/quote-decision` — quote decision → core `quote_decision`\n- `POST /webhook/data-import` · `GET/POST /webhook/data-import-form` — data import → core `import_data`",
+        "width": 700,
+        "height": 300,
+        "color": 4
+      },
+      "id": "e3234645-b5fc-4fac-aafb-3d3903c6dd70",
+      "name": "Note 6a6b0697",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "quote-decision",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b64b89ed-42a0-4f56-9056-40f13aa46df0",
+      "name": "Quote Decision Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        600
+      ],
+      "webhookId": "2da4e470-fdda-48fa-9196-fc89b40aa934"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The request body is the quote decision contract.\nreturn [{ json: { operation: \"quote_decision\", payload: $input.first().json.body ?? {} } }];"
+      },
+      "id": "42093b8b-f35b-4b6b-9277-c4e97c9c3ee1",
+      "name": "Quote Decision Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gjZKWMvALA8gsb20"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "92561b4e-a4ac-423b-a284-9b9ae79041f8",
+      "name": "RFQ Core Quote Decision",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "6b063b51-bbaf-42c0-ac43-13ed95c1017f",
+      "name": "Respond Quote Decision",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "data-import",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "72e2f548-8caf-4ef3-8830-ec875d79ee37",
+      "name": "Import API Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1000
+      ],
+      "webhookId": "08914bc6-d03e-4951-be2e-baa66e610510",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "akAkO1gOoeARVJAJ",
+          "name": "Import API Token (dev)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "data-import-form",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "04b7a0c2-db56-42ee-85ab-4eed26cd0310",
+      "name": "Import Form Submitted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1200
+      ],
+      "webhookId": "8cdb4dee-df21-4d35-848e-3cad3ac34d2c",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "xWGLHH2P5jZaN2W5",
+          "name": "Import Form Login (dev)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "data-import-form",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "50242a2b-eab9-4905-9924-74c46083a06d",
+      "name": "Import Form Opened",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1800
+      ],
+      "webhookId": "d824c0b1-8b65-4c74-bb37-18e12d294b05",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "xWGLHH2P5jZaN2W5",
+          "name": "Import Form Login (dev)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One import request from the API (JSON rows or a file) or the upload form (a file).\n// The channel only turns the input into rows keyed by column headers; the core validates the data.\nconst item = $input.first();\nconst request = item.json;\nconst body = request.body ?? {};\nconst query = request.query ?? {};\nconst fromForm = $('Import Form Submitted').isExecuted;\nconst kind = String(body.kind ?? query.kind ?? \"\").trim();\nconst binaryKey = Object.keys(item.binary ?? {})[0];\n\nconst base = {\n  kind,\n  source: fromForm ? \"upload_form\" : \"api\",\n  respond_as: fromForm ? \"html\" : \"json\",\n};\n\nif (binaryKey) {\n  const file = item.binary[binaryKey];\n  const filename = String(file.fileName ?? body.filename ?? query.filename ?? \"file\");\n  const extension = filename.toLowerCase().match(/\\.([a-z0-9]+)$/)?.[1] ?? \"\";\n  const fileType = { xlsx: \"xlsx\", xls: \"xls\", csv: \"csv\", txt: \"csv\" }[extension] ?? \"unsupported\";\n  return [{ json: { ...base, filename, file_type: fileType, binary_key: binaryKey }, binary: item.binary }];\n}\nif (Array.isArray(body.rows)) {\n  return [{ json: { ...base, filename: body.filename ?? null, file_type: \"rows\", rows: body.rows } }];\n}\nreturn [{ json: { ...base, filename: null, file_type: \"missing\" } }];"
+      },
+      "id": "9f0c82a6-7584-4216-8adb-8b6385de861a",
+      "name": "Import Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 5,
+        "output": "={{ { rows: 0, csv: 1, xlsx: 2, xls: 3 }[$json.file_type] ?? 4 }}"
+      },
+      "id": "890c8af6-3c2e-4621-80e5-6023a16fcab5",
+      "name": "Import Input",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// CSV exported from an ERP or Excel: UTF-8 (with or without BOM) or Windows-1250 (Polish Excel),\n// delimiter \";\" (Polish Excel), \",\" or tab — detected from the header line. Quoted fields per RFC 4180.\nconst request = $input.first().json;\nconst bytes = await this.helpers.getBinaryDataBuffer(0, request.binary_key);\n\nlet text;\ntry {\n  text = new TextDecoder(\"utf-8\", { fatal: true }).decode(bytes);\n} catch {\n  text = new TextDecoder(\"windows-1250\").decode(bytes);\n}\ntext = text.replace(/^﻿/, \"\");\n\nfunction countOutsideQuotes(line, char) {\n  let count = 0;\n  let quoted = false;\n  for (const c of line) {\n    if (c === '\"') quoted = !quoted;\n    else if (c === char && !quoted) count++;\n  }\n  return count;\n}\nconst headerLine = text.split(/\\r?\\n/, 1)[0] ?? \"\";\nconst delimiter = [\";\", \",\", \"\\t\"]\n  .map(char => ({ char, count: countOutsideQuotes(headerLine, char) }))\n  .sort((a, b) => b.count - a.count)[0].char;\n\n// RFC 4180 parser: quotes, escaped quotes (\"\"), delimiters and line breaks inside quotes.\nconst records = [];\nlet record = [];\nlet field = \"\";\nlet quoted = false;\nfor (let i = 0; i < text.length; i++) {\n  const c = text[i];\n  if (quoted) {\n    if (c === '\"' && text[i + 1] === '\"') { field += '\"'; i++; }\n    else if (c === '\"') quoted = false;\n    else field += c;\n  } else if (c === '\"' && field === \"\") quoted = true;\n  else if (c === delimiter) { record.push(field); field = \"\"; }\n  else if (c === \"\\n\" || c === \"\\r\") {\n    if (c === \"\\r\" && text[i + 1] === \"\\n\") i++;\n    record.push(field); records.push(record); record = []; field = \"\";\n  } else field += c;\n}\nif (field !== \"\" || record.length) { record.push(field); records.push(record); }\n// Trailing empty lines are not data rows (empty lines inside the file stay and fail validation with their row number).\nwhile (records.length && records[records.length - 1].every(value => value.trim() === \"\")) records.pop();\n\nconst headers = (records.shift() ?? []).map(h => h.trim());\nconst rows = records.map(values => {\n  const row = {};\n  headers.forEach((header, index) => {\n    if (header !== \"\") row[header] = values[index] ?? \"\";\n  });\n  return row;\n});\n\nconst { binary_key: binaryKey, file_type: fileType, ...command } = request;\nreturn [{ json: { ...command, rows, parse_info: { delimiter, header_count: headers.length } } }];"
+      },
+      "id": "8c1c7498-69d4-4f72-8077-c47e59dc6e04",
+      "name": "Parse CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "={{ $json.binary_key }}",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "41ed33a2-5d59-4a69-9d37-16a786c95ddc",
+      "name": "Extract Import XLSX",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        1250
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "xls",
+        "binaryPropertyName": "={{ $json.binary_key }}",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "db1da008-fba7-4418-b8fa-14a070494e6d",
+      "name": "Extract Import XLS",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        1400
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// The first sheet, one item per row (header = row 1). An empty sheet gives no rows; the core rejects it.\nconst { binary_key: binaryKey, file_type: fileType, ...command } = $('Import Request').first().json;\nconst rows = $input.all().map(item => item.json).filter(row => Object.keys(row).length > 0);\nreturn [{ json: { ...command, rows } }];"
+      },
+      "id": "75cb193e-3c57-4025-9c94-8c43b9d2ce4a",
+      "name": "Collect Sheet Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $input.first().json;\nconst error = request.file_type === \"unsupported\"\n  ? `Unsupported file \"${request.filename}\". Send CSV, XLSX or XLS.`\n  : \"Send a file (multipart field \\\"file\\\" with ?kind=...) or JSON { kind, rows: [...] }.\";\nreturn [{ json: { http_status: 422, body: { status: \"REJECTED\", kind: request.kind || null, error_count: 1, errors: [error] } } }];"
+      },
+      "id": "56b72516-8091-4ce3-823b-edcb2800cb1f",
+      "name": "Import Input Rejected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        1550
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { kind, rows, source, filename } = $input.first().json;\nreturn [{ json: { operation: \"import_data\", payload: { kind, rows, source, filename } } }];"
+      },
+      "id": "c2bcb6db-e870-49da-85db-e00f965d089c",
+      "name": "Import Data Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gjZKWMvALA8gsb20"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "36dcaae8-600e-4c0f-b2c3-78e1c2ff7b27",
+      "name": "RFQ Core Import",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Result of the core (or of a request rejected by the channel): { http_status, body }.\nconst { http_status: httpStatus, body } = $input.first().json;\nreturn [{ json: { http_status: httpStatus, body } }];"
+      },
+      "id": "9f750921-a13e-4602-84d8-0e35677c1bcd",
+      "name": "Import Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "644131ae-cea7-4a39-8dd7-a8cb9f5050d5",
+              "leftValue": "={{ $('Import Request').first().json.respond_as === 'html' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f00a9bde-b71c-418f-96de-8dcbbdb2dfa2",
+      "name": "Respond With Page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1760,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "652607f4-5619-41f0-98f1-e38e7c6208b1",
+      "name": "Respond Import",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        1250
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    (SELECT value #>> '{}' FROM app_settings WHERE key = 'language') AS language,\n    (SELECT COALESCE(jsonb_agg(to_jsonb(b) ORDER BY b.created_at DESC), '[]'::jsonb)\n       FROM (SELECT kind, source, filename, status, row_count, summary, errors, created_at\n             FROM import_batches ORDER BY created_at DESC LIMIT 10) b) AS recent;",
+        "options": {
+          "largeNumbersOutput": "numbers"
+        }
+      },
+      "id": "eff54bde-4ccf-4946-bb14-ea83fb853b89",
+      "name": "Load Import Page Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1980,
+        1800
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "7hqY9Dpt4azX9jBD",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upload form (GET) and import result page (POST) — one Code node renders both, in the installation language.\nconst { language, recent } = $input.first().json;\nconst showResult = $('Import Form Submitted').isExecuted;\n\nconst TEXTS = {\n  pl: {\n    title: \"Import danych\",\n    intro: \"Wgraj pełny plik z ERP lub Excela (CSV, XLSX, XLS). Rekordy, których nie ma w pliku, zostaną dezaktywowane. Plik jest wgrywany w całości albo wcale.\",\n    kind: \"Rodzaj danych\",\n    kinds: { catalogue: \"Katalog produktów z cenami bazowymi\", customers: \"Klienci (e-maile / domeny, rabat)\", customer_prices: \"Ceny indywidualne klientów\" },\n    file: \"Plik\",\n    submit: \"Importuj\",\n    recent: \"Ostatnie importy\",\n    columns: [\"Czas\", \"Rodzaj\", \"Źródło\", \"Plik\", \"Status\", \"Wiersze\", \"Wynik\"],\n    status: { APPLIED: \"Zaimportowano\", DUPLICATE: \"Bez zmian — te dane były już zaimportowane\", REJECTED: \"Odrzucono — nic nie zostało zmienione\" },\n    summary: {\n      products_inserted: \"nowe produkty\", products_updated: \"zmienione produkty\", products_deactivated: \"dezaktywowane produkty\",\n      prices_changed: \"zmienione ceny\", prices_deactivated: \"dezaktywowane ceny\",\n      customers_inserted: \"nowi klienci\", customers_updated: \"zmienieni klienci\", customers_deactivated: \"dezaktywowani klienci\",\n      customer_prices_deactivated: \"dezaktywowane ceny klientów\",\n      prices_inserted: \"nowe ceny\", prices_updated: \"zmienione ceny\",\n    },\n    errors: \"Błędy (numer wiersza jak w arkuszu, nagłówek = wiersz 1)\",\n    more_errors: \"… i {count} kolejnych.\",\n    back: \"Wróć do formularza\",\n    rows: \"Wiersze\",\n  },\n  en: {\n    title: \"Data import\",\n    intro: \"Upload a complete file from the ERP or Excel (CSV, XLSX, XLS). Records missing from the file are deactivated. The file is applied completely or not at all.\",\n    kind: \"Data\",\n    kinds: { catalogue: \"Product catalogue with base prices\", customers: \"Customers (emails / domains, discount)\", customer_prices: \"Customer-specific prices\" },\n    file: \"File\",\n    submit: \"Import\",\n    recent: \"Recent imports\",\n    columns: [\"Time\", \"Data\", \"Source\", \"File\", \"Status\", \"Rows\", \"Result\"],\n    status: { APPLIED: \"Imported\", DUPLICATE: \"No change — this data was already imported\", REJECTED: \"Rejected — nothing was changed\" },\n    summary: {},\n    errors: \"Errors (row numbers as in the spreadsheet, header = row 1)\",\n    more_errors: \"… and {count} more.\",\n    back: \"Back to the form\",\n    rows: \"Rows\",\n  },\n};\nconst t = TEXTS[language] ?? TEXTS.en;\n\nfunction escapeHtml(value) {\n  return String(value ?? \"\")\n    .replaceAll(\"&\", \"&amp;\")\n    .replaceAll(\"<\", \"&lt;\")\n    .replaceAll(\">\", \"&gt;\")\n    .replaceAll('\"', \"&quot;\")\n    .replaceAll(\"'\", \"&#39;\");\n}\n// Times in the installation time zone (n8n GENERIC_TIMEZONE / TIMEZONE in .env), with the offset shown.\nconst localTime = value => DateTime.fromISO(String(value)).toFormat(\"yyyy-MM-dd HH:mm '(UTC'ZZ')'\");\nconst summaryText = summary => Object.entries(summary ?? {})\n  .filter(([, count]) => Number(count) > 0)\n  .map(([key, count]) => `${t.summary[key] ?? key.replaceAll(\"_\", \" \")}: ${count}`)\n  .join(\", \") || \"—\";\nfunction page(body, httpStatus = 200) {\n  const html = `<!doctype html>\n<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${escapeHtml(t.title)}</title>\n<style>\n  html { color-scheme: light; } body { font-family: Arial, sans-serif; font-size: 15px; color: #222; background: #fff; max-width: 900px; margin: 24px auto; padding: 0 16px; }\n  label { display: block; margin: 12px 0 4px; font-weight: bold; }\n  select, input[type=file] { width: 100%; padding: 6px; box-sizing: border-box; }\n  .box { background: #f4f4f4; padding: 10px 12px; margin: 12px 0; }\n  .ok { border-left: 4px solid #2e7d32; } .bad { border-left: 4px solid #c62828; }\n  button { margin-top: 16px; padding: 8px 16px; font-size: 15px; }\n  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }\n  th, td { border-bottom: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }\n  .wrap { overflow-x: auto; }\n</style></head><body><h1>${escapeHtml(t.title)}</h1>${body}</body></html>`;\n  return [{ json: { html, http_status: httpStatus } }];\n}\n\nif (showResult) {\n  const { http_status: httpStatus, body } = $('Import Result').first().json;\n  const good = body.status === \"APPLIED\" || body.status === \"DUPLICATE\";\n  const errors = body.errors ?? [];\n  const errorList = errors.length\n    ? `<p><b>${escapeHtml(t.errors)}</b></p><ul>${errors.map(e => `<li>${escapeHtml(e)}</li>`).join(\"\")}</ul>` +\n      (body.error_count > errors.length ? `<p>${escapeHtml(t.more_errors.replace(\"{count}\", body.error_count - errors.length))}</p>` : \"\")\n    : \"\";\n  const kindLabel = t.kinds[body.kind] ?? body.kind ?? \"\";\n  return page(`\n  <div class=\"box ${good ? \"ok\" : \"bad\"}\">\n    <b>${escapeHtml(t.status[body.status] ?? body.status)}</b>${kindLabel ? ` — ${escapeHtml(kindLabel)}` : \"\"}<br>\n    ${body.row_count !== undefined ? `${escapeHtml(t.rows)}: ${escapeHtml(body.row_count)}<br>` : \"\"}\n    ${body.summary ? escapeHtml(summaryText(body.summary)) : \"\"}\n  </div>\n  ${errorList}\n  <p><a href=\"\">${escapeHtml(t.back)}</a></p>`, httpStatus);\n}\n\nconst options = Object.entries(t.kinds)\n  .map(([value, label]) => `<option value=\"${value}\">${escapeHtml(label)}</option>`).join(\"\");\nconst history = (recent ?? []).map(batch => `<tr>\n  <td>${escapeHtml(localTime(batch.created_at))}</td>\n  <td>${escapeHtml(t.kinds[batch.kind] ?? batch.kind)}</td>\n  <td>${escapeHtml(batch.source)}</td>\n  <td>${escapeHtml(batch.filename ?? \"\")}</td>\n  <td>${escapeHtml(t.status[batch.status]?.split(\" — \")[0] ?? batch.status)}</td>\n  <td>${escapeHtml(batch.row_count)}</td>\n  <td>${escapeHtml(batch.status === \"APPLIED\" ? summaryText(batch.summary) : (batch.errors ?? [])[0] ?? \"\")}</td>\n</tr>`).join(\"\");\n\nreturn page(`\n  <p>${escapeHtml(t.intro)}</p>\n  <form method=\"post\" action=\"\" enctype=\"multipart/form-data\">\n    <label for=\"kind\">${escapeHtml(t.kind)}</label>\n    <select id=\"kind\" name=\"kind\" required>${options}</select>\n    <label for=\"file\">${escapeHtml(t.file)}</label>\n    <input type=\"file\" id=\"file\" name=\"file\" accept=\".csv,.txt,.xlsx,.xls\" required>\n    <button type=\"submit\">${escapeHtml(t.submit)}</button>\n  </form>\n  ${history ? `<h2>${escapeHtml(t.recent)}</h2><div class=\"wrap\"><table><tr>${t.columns.map(c => `<th>${escapeHtml(c)}</th>`).join(\"\")}</tr>${history}</table></div>` : \"\"}`);"
+      },
+      "id": "9eb0f13a-71f4-4489-8390-a6ad02a27609",
+      "name": "Render Import Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        1800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6da6cca4-d711-4907-a844-0be048a5b061",
+      "name": "Respond Import Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2420,
+        1800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Data import (ERP / Excel → core `import_data`)\n- `POST /webhook/data-import` (header `X-Import-Token`) — JSON `{ kind, rows }` or multipart `file` + `?kind=` → 200 APPLIED / DUPLICATE, 422 REJECTED\n- `GET/POST /webhook/data-import-form` (basic auth) — upload form for people, recent imports\nCSV: UTF-8 or Windows-1250, `;` `,` or tab. XLSX/XLS: first sheet, header = row 1.",
+        "width": 2600,
+        "height": 1260,
+        "color": 7
+      },
+      "id": "740522a5-6901-4dfa-b632-8e855ae3c8de",
+      "name": "Note Import",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Every API call carries the installation's API key: header X-API-Key or Authorization: Bearer <key>.\n// Webhook-level n8n credentials would answer 403 in n8n's own format; this gate answers 401 in ours.\nconst request = $input.first().json;\nconst headers = request.headers ?? {};\nconst bearer = String(headers.authorization ?? \"\").match(/^Bearer\\s+(.+)$/i)?.[1];\nconst apiKey = String(headers[\"x-api-key\"] ?? bearer ?? \"\").trim();\nconst endpoint = $('RFQ Webhook').isExecuted ? \"rfq\"\n  : $('Review Decision Webhook').isExecuted ? \"rfq-review\"\n  : \"quote-decision\";\nreturn [{ json: { endpoint, api_key: apiKey || null, request } }];"
+      },
+      "id": "149cb40a-8393-4212-80a4-5f8efc2f886d",
+      "name": "API Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Only the SHA-256 of the installation's API key is stored (app_settings.api_key_sha256).\n-- No key configured = every request is rejected (fail closed).\nSELECT COALESCE(\n    (SELECT value #>> '{}' FROM app_settings WHERE key = 'api_key_sha256')\n        = encode(sha256(convert_to($1::jsonb ->> 'api_key', 'UTF8')), 'hex'),\n    FALSE\n) AS valid;",
+        "options": {
+          "queryReplacement": "=$1 → {{ JSON.stringify({ api_key: $json.api_key }) }}"
+        }
+      },
+      "id": "b7d58e20-c557-4ba0-88b8-e8abc23370bc",
+      "name": "Check API Key",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "7hqY9Dpt4azX9jBD",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "df691a63-6b93-4bfa-bf77-9faf5b0f6551",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0253e0f1-c254-43a1-8b24-fb5b62ee1496",
+      "name": "API Key Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The original webhook request continues to its lane.\nconst { endpoint, request } = $('API Request').first().json;\nreturn [{ json: { ...request, endpoint } }];"
+      },
+      "id": "6b67b850-476e-448b-995f-948e0574dbe0",
+      "name": "Authorized Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ { \"rfq\": 0, \"rfq-review\": 1, \"quote-decision\": 2 }[$json.endpoint] }}"
+      },
+      "id": "6b83a911-76cf-42ba-bd51-453d9c42cf21",
+      "name": "Route API Request",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: \"REJECTED\", reason: \"UNAUTHORIZED\", errors: [\"Missing or invalid API key. Send it in the X-API-Key header or as Authorization: Bearer <key>.\"] }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "WWW-Authenticate",
+                "value": "Bearer"
+              }
+            ]
+          }
+        }
+      },
+      "id": "46cc3ddd-4a62-4ac2-8562-267e5b6ed03f",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        450
+      ]
+    }
+  ],
+  "connections": {
+    "RFQ Webhook": {
+      "main": [
+        [
+          {
+            "node": "API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canonical RFQ": {
+      "main": [
+        [
+          {
+            "node": "RFQ Intake Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RFQ Intake Command": {
+      "main": [
+        [
+          {
+            "node": "RFQ Core Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RFQ Core Intake": {
+      "main": [
+        [
+          {
+            "node": "Respond RFQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Decision Webhook": {
+      "main": [
+        [
+          {
+            "node": "API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Decision Command": {
+      "main": [
+        [
+          {
+            "node": "RFQ Core Review Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RFQ Core Review Decision": {
+      "main": [
+        [
+          {
+            "node": "Respond Review Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote Decision Webhook": {
+      "main": [
+        [
+          {
+            "node": "API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote Decision Command": {
+      "main": [
+        [
+          {
+            "node": "RFQ Core Quote Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RFQ Core Quote Decision": {
+      "main": [
+        [
+          {
+            "node": "Respond Quote Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import API Webhook": {
+      "main": [
+        [
+          {
+            "node": "Import Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Form Submitted": {
+      "main": [
+        [
+          {
+            "node": "Import Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Request": {
+      "main": [
+        [
+          {
+            "node": "Import Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Input": {
+      "main": [
+        [
+          {
+            "node": "Import Data Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse CSV",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Import XLSX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Import XLS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Import Input Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV": {
+      "main": [
+        [
+          {
+            "node": "Import Data Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Import XLSX": {
+      "main": [
+        [
+          {
+            "node": "Collect Sheet Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Import XLS": {
+      "main": [
+        [
+          {
+            "node": "Collect Sheet Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Sheet Rows": {
+      "main": [
+        [
+          {
+            "node": "Import Data Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Data Command": {
+      "main": [
+        [
+          {
+            "node": "RFQ Core Import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RFQ Core Import": {
+      "main": [
+        [
+          {
+            "node": "Import Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Input Rejected": {
+      "main": [
+        [
+          {
+            "node": "Import Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Result": {
+      "main": [
+        [
+          {
+            "node": "Respond With Page?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond With Page?": {
+      "main": [
+        [
+          {
+            "node": "Load Import Page Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Import Form Opened": {
+      "main": [
+        [
+          {
+            "node": "Load Import Page Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Import Page Data": {
+      "main": [
+        [
+          {
+            "node": "Render Import Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Import Page": {
+      "main": [
+        [
+          {
+            "node": "Respond Import Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Request": {
+      "main": [
+        [
+          {
+            "node": "Check API Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Key": {
+      "main": [
+        [
+          {
+            "node": "API Key Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Key Valid?": {
+      "main": [
+        [
+          {
+            "node": "Authorized Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized Request": {
+      "main": [
+        [
+          {
+            "node": "Route API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route API Request": {
+      "main": [
+        [
+          {
+            "node": "Canonical RFQ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Review Decision Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quote Decision Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "VP5QFCgs9Ir6CigL"
+  }
+}
